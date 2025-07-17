@@ -1,0 +1,12 @@
+venv/
+*.csv
+*.json
+*.log
+*.txt
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+data/
+.env
