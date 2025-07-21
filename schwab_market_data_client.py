@@ -7,6 +7,7 @@ with optimal period chunking and comprehensive data quality validation.
 
 import calendar
 import os
+import sys
 import time
 import logging
 import pytz
@@ -16,6 +17,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass
 from dotenv import load_dotenv
+
+# Add the authentication module to the path
+sys.path.append(os.path.join(os.path.dirname(__file__), 'charles-schwab-authentication-module'))
+from schwab_auth import SchwabAuth
 
 # Load environment variables from .env file
 load_dotenv()
@@ -32,7 +37,6 @@ logger = logging.getLogger(__name__)
 class APIConfig:
     """Configuration for the Schwab Market Data API."""
     server: str = "https://api.schwabapi.com/marketdata/v1"
-    access_token: str = os.getenv("SCHWAB_ACCESS_TOKEN") or ""
     timeout: int = 30
     rate_limit_delay: float = 1.0
 
@@ -256,6 +260,10 @@ class SchwabMarketDataClient:
         self.market_config = market_config
         self.processor = MarketDataProcessor(market_config)
         self.validator = DataQualityValidator()
+        
+        # Initialize authentication module
+        self.auth = SchwabAuth()
+        self.access_token = None
     
     def get_price_history(self, symbol: str, start_date: Optional[str], 
                          end_date: Optional[str], time_interval: int) -> Optional[pd.DataFrame]:
@@ -285,6 +293,21 @@ class SchwabMarketDataClient:
         
         return self.processor.process_candles(all_candles)
     
+    def _get_valid_access_token(self) -> Optional[str]:
+        """Get a valid access token from GCS refresh token."""
+        if self.access_token:
+            return self.access_token
+        
+        logger.info("🔐 Getting access token from GCS refresh token...")
+        self.access_token = self.auth.get_valid_access_token(use_gcs_refresh_token=True)
+        
+        if not self.access_token:
+            logger.error("❌ Failed to get access token from GCS")
+            return None
+        
+        logger.info("✅ Successfully obtained access token")
+        return self.access_token
+    
     def _validate_inputs(self, symbol: str, time_interval: int) -> bool:
         """Validate input parameters."""
         valid_intervals = [1, 5, 10, 15, 30]
@@ -297,8 +320,9 @@ class SchwabMarketDataClient:
             logger.error("❌ Invalid symbol provided")
             return False
         
-        if not self.api_config.access_token:
-            logger.error("❌ No access token provided")
+        # Get access token automatically
+        if not self._get_valid_access_token():
+            logger.error("❌ Failed to get valid access token")
             return False
         
         return True
@@ -366,7 +390,7 @@ class SchwabMarketDataClient:
             'needPreviousClose': 'false'
         }
         
-        headers = {'Authorization': f'Bearer {self.api_config.access_token}'}
+        headers = {'Authorization': f'Bearer {self.access_token}'}
         url = f"{self.api_config.server}/pricehistory"
         
         logger.info(f"📡 Fetching {period} days for {symbol} ({time_interval}m) from {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}")
@@ -391,7 +415,7 @@ class SchwabMarketDataClient:
                 return None
                 
         except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Network error fetching price history: {e}")
+            logger.error(f"❌ Network error sfetching price history: {e}")
             return None
         except Exception as e:
             logger.error(f"❌ Unexpected error fetching price history: {e}")
@@ -407,13 +431,17 @@ def main():
     client = SchwabMarketDataClient(api_config, market_config)
     
     # Parameters
-    symbol = "SPY"
+    symbols = open("symbols.txt").read().splitlines()
+    timeframes = open("timeframes.txt").read().splitlines()
     start_date = "2025-01-01"
     end_date = datetime.now().strftime("%Y-%m-%d")
-    time_interval = 5  # 1, 5, 10, 15, 30 minutes
-    
-    # Fetch data
-    df = client.get_price_history(symbol, start_date, end_date, time_interval)
+    for symbol in symbols:
+        for timeframe in timeframes:
+            time_interval = int(timeframe.split("m")[0])
+            df = client.get_price_history(symbol, start_date, end_date, time_interval)
+            if df is not None and not df.empty:
+                filename = f"data/{timeframe}/{symbol}.csv"
+                df.to_csv(filename, index=False)
     
     if df is not None and not df.empty:
         # Validate data quality
