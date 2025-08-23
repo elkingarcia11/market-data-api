@@ -11,3 +11,4 @@ data/
 .env
 schwab_refresh_token.txt
 service-account-credentials.json
+.DS_Store

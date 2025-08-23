@@ -212,9 +212,9 @@ class MarketDataProcessor:
         dt_utc = datetime.fromtimestamp(timestamp_ms / 1000, tz=pytz.UTC)
         dt_et = dt_utc.astimezone(self.timezone)
         
-        # Filter out data outside market hours
+        # Filter out data outside market hours (exclude 16:00 candle which is post-market)
         candle_time = dt_et.time()
-        if candle_time < self.market_open or candle_time > self.market_close:
+        if candle_time < self.market_open or candle_time >= self.market_close:
             return None
         
         # Special condition: July 3rd market closes at 1:00 PM EDT
@@ -329,11 +329,14 @@ class SchwabMarketDataClient:
     
     def _parse_dates(self, start_date: Optional[str], end_date: Optional[str]) -> Tuple[datetime, datetime]:
         """Parse and localize start and end dates."""
-        if start_date and end_date:
+        if start_date:
             start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         else:
             start_dt = datetime.strptime("2025-01-01", "%Y-%m-%d")
+            
+        if end_date:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        else:
             end_dt = datetime.now()
         
         # Make timezone-aware
@@ -386,8 +389,8 @@ class SchwabMarketDataClient:
             'frequency': time_interval,
             'startDate': start_time_ms,
             'endDate': end_time_ms,
-            'needExtendedHoursData': 'false',
-            'needPreviousClose': 'false'
+            'needExtendedHoursData': 'true',  # Enable extended hours to get today's data
+            'needPreviousClose': 'true'  # Include previous close data
         }
         
         headers = {'Authorization': f'Bearer {self.access_token}'}
@@ -401,12 +404,24 @@ class SchwabMarketDataClient:
             
             if response.status_code == 200:
                 data = response.json()
+                logger.info(f"🔍 API Response keys: {list(data.keys())}")
+                
                 if 'candles' in data and data['candles']:
                     candles = data['candles']
                     logger.info(f"✅ Retrieved {len(candles)} candles for this period")
+                    
+                    # Show the first and last candle timestamps
+                    if candles:
+                        first_candle = candles[0]
+                        last_candle = candles[-1]
+                        logger.info(f"📅 First candle: {first_candle.get('datetime', 'N/A')} (timestamp: {first_candle.get('datetime', 'N/A')})")
+                        logger.info(f"📅 Last candle: {last_candle.get('datetime', 'N/A')} (timestamp: {last_candle.get('datetime', 'N/A')})")
+                    
                     return candles
                 else:
                     logger.info("📊 No candle data found in API response for this period")
+                    if 'candles' in data:
+                        logger.info(f"📊 Candles array is empty: {data['candles']}")
                     return []
             else:
                 logger.error(f"❌ API request failed: {response.status_code}")
@@ -430,29 +445,76 @@ def main():
     # Create client
     client = SchwabMarketDataClient(api_config, market_config)
     
-    # Parameters
+    # Parameters - Fetch from Aug 16, 2025 until today
     symbols = open("symbols.txt").read().splitlines()
-    timeframes = open("timeframes.txt").read().splitlines()
-    start_date = "2025-01-01"
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    for symbol in symbols:
-        for timeframe in timeframes:
-            time_interval = int(timeframe.split("m")[0])
+    start_date, end_date = open("start_end_date.txt").read().splitlines()
+    time_intervals = open("timeframes.txt").read().splitlines()
+    # Use 1-minute intervals
+    for time_interval in time_intervals:
+        time_interval = int(time_interval)  # Convert string to integer 
+        
+        logger.info(f"📊 Fetching {time_interval}-minute data from {start_date} until today")
+        
+        # Check if January 1, 2025 was a market holiday
+        jan1_2025 = datetime(2025, 1, 1)
+        logger.info(f"📅 January 1, 2025 was a {jan1_2025.strftime('%A')} (weekday: {jan1_2025.weekday()})")
+        
+        for symbol in symbols:
+            logger.info(f"🔄 Processing {symbol} with {time_interval}m timeframe")
+            
+            # First, get the historical data
             df = client.get_price_history(symbol, start_date, end_date, time_interval)
+            
             if df is not None and not df.empty:
-                filename = f"data/{timeframe}/{symbol}.csv"
-                df.to_csv(filename, index=False)
-    
-    if df is not None and not df.empty:
-        # Validate data quality
-        if DataQualityValidator.validate_dataframe(df):
-            filename = f"data/{symbol}_{time_interval}m.csv"
-            df.to_csv(filename, index=False)
-            logger.info(f"💾 Data saved to {filename}")
-        else:
-            logger.error("❌ Data quality issues detected - not saving to file")
-    else:
-        logger.error("❌ No data retrieved - cannot run tests")
+                # Validate data quality
+                if DataQualityValidator.validate_dataframe(df):
+                    # Create directory structure if it doesn't exist
+                    timeframe_dir = f"data/{time_interval}m"
+                    os.makedirs(timeframe_dir, exist_ok=True)
+                    
+                    filename = f"{timeframe_dir}/{symbol}.csv"
+                    
+                    # Check if file exists and append mode
+                    if os.path.exists(filename):
+                        # Read existing data
+                        existing_df = pd.read_csv(filename)
+                        logger.info(f"📁 Found existing file with {len(existing_df)} records")
+                        
+                        # Combine with new data
+                        combined_df = pd.concat([existing_df, df], ignore_index=True)
+                        
+                        # Remove duplicates based on timestamp
+                        combined_df = combined_df.drop_duplicates(subset=['timestamp'], keep='last')
+                        
+                        # Sort by timestamp
+                        combined_df = combined_df.sort_values('timestamp')
+                        
+                        logger.info(f"🔄 Combined data: {len(existing_df)} existing + {len(df)} new = {len(combined_df)} total records")
+                        
+                        # Save combined data
+                        combined_df.to_csv(filename, index=False)
+                        logger.info(f"💾 Data appended to {filename}")
+                    else:
+                        # Save new data
+                        df.to_csv(filename, index=False)
+                        logger.info(f"💾 Data saved to {filename}")
+                    
+                    # Show the latest timestamp in the data
+                    if not df.empty:
+                        latest_timestamp = df['timestamp'].max()
+                        latest_datetime = df['datetime'].iloc[-1]
+                        logger.info(f"📅 Latest data timestamp: {latest_timestamp} ({latest_datetime})")
+                        
+                        # Show the first timestamp in the data
+                        first_timestamp = df['timestamp'].min()
+                        first_datetime = df['datetime'].iloc[0]
+                        logger.info(f"📅 First data timestamp: {first_timestamp} ({first_datetime})")
+                    else:
+                        logger.info("📊 No data available for the specified date range")
+                else:
+                    logger.error("❌ Data quality issues detected - not saving to file")
+            else:
+                logger.warning(f"⚠️  No data retrieved for {symbol}_{time_interval}m")
 
 if __name__ == "__main__":
     main()
