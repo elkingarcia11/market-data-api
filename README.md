@@ -8,6 +8,10 @@ A robust Python client for fetching historical market data from the Schwab Marke
 - **Comprehensive Data Validation**: Built-in quality checks for duplicates, null values, negative prices, and timestamp ordering
 - **Market Hours Filtering**: Automatically filters data to regular market hours (9:30 AM - 4:00 PM ET)
 - **Special Holiday Handling**: Supports early market closures (July 3rd, Black Friday, December 24th, etc.)
+- **Data Appending**: Smart append functionality that automatically combines new data with existing files
+- **GCS Authentication**: Integrated Google Cloud Storage authentication for Schwab refresh tokens
+- **Multiple Timeframes**: Support for 1m, 5m, 10m, 15m, 30m intervals with configurable fetching
+- **Data Aggregation**: Built-in aggregation tools to convert minute data to higher timeframes
 - **Professional Logging**: Structured logging with timestamps and log levels
 - **Type Safety**: Full type hints for better IDE support and code clarity
 - **Modular Architecture**: Clean, maintainable object-oriented design
@@ -51,38 +55,50 @@ A robust Python client for fetching historical market data from the Schwab Marke
 
 ## 🔧 Configuration
 
-### Environment Setup
+### Configuration Files
 
-1. **Create a `.env` file** in the project root:
+The client uses configuration files for flexible operation:
 
-   ```bash
-   touch .env
+1. **`start_end_date.txt`**: Contains start and end dates (one per line)
+
+   ```
+   2025-08-15
+   2025-08-23
    ```
 
-2. **Add your Schwab API access token** to the `.env` file:
+2. **`symbols.txt`**: Lists symbols to fetch (one per line)
 
-   ```env
-   SCHWAB_ACCESS_TOKEN=your_access_token_here
+   ```
+   SPY
+   QQQ
+   AAPL
    ```
 
-   **⚠️ Important**: Never commit your `.env` file to version control. It's already included in `.gitignore`.
+3. **`timeframes.txt`**: Specifies time intervals (one per line)
+   ```
+   1
+   5
+   15
+   ```
 
-### Getting Your Schwab API Access Token
+### Authentication Setup
 
-To use this client, you'll need a Schwab API access token:
+The client uses Google Cloud Storage (GCS) for secure authentication token management:
+
+1. **Schwab Authentication Module**: Uses the integrated `charles-schwab-authentication-module`
+2. **GCS Integration**: Automatically retrieves refresh tokens from Google Cloud Storage
+3. **Token Management**: Handles token refresh and expiration automatically
+
+### Getting Your Schwab API Access
+
+To use this client, you'll need Schwab API access:
 
 1. **Register for Schwab Developer Account**: Visit the [Schwab Developer Portal](https://developer.schwab.com/)
 2. **Create an Application**: Set up a new application in your developer dashboard
-3. **Generate Access Token**: Follow Schwab's OAuth flow to obtain your access token
-4. **Add to .env File**: Place your token in the `.env` file as shown above
+3. **Set up OAuth**: Configure OAuth flow for token generation
+4. **Configure GCS**: Set up Google Cloud Storage for secure token storage
 
-**Note**: The access token has expiration times and usage limits. Refer to Schwab's API documentation for current limits and renewal procedures.
-
-3. **Install dependencies** (python-dotenv is already included in requirements.txt):
-
-   ```bash
-   pip install -r requirements.txt
-   ```
+**Note**: The authentication system automatically handles token refresh and expiration.
 
 ### API Configuration
 
@@ -118,7 +134,30 @@ class MarketConfig:
 
 ## 📖 Usage
 
-### Basic Usage
+### Quick Start
+
+1. **Configure your symbols and timeframes**:
+
+   ```bash
+   echo "SPY" > symbols.txt
+   echo "5" > timeframes.txt
+   echo -e "2025-08-15\n2025-08-23" > start_end_date.txt
+   ```
+
+2. **Run the client**:
+   ```bash
+   source venv/bin/activate
+   python schwab_market_data_client.py
+   ```
+
+The client will automatically:
+
+- Fetch data for all symbols in `symbols.txt`
+- Use all timeframes in `timeframes.txt`
+- Save data to `data/{timeframe}m/{symbol}.csv`
+- Append new data to existing files (no duplicates)
+
+### Programmatic Usage
 
 ```python
 from schwab_market_data_client import SchwabMarketDataClient, APIConfig, MarketConfig
@@ -133,14 +172,46 @@ client = SchwabMarketDataClient(api_config, market_config)
 # Fetch data
 df = client.get_price_history(
     symbol="SPY",
-    start_date="2025-01-01",
-    end_date="2025-07-17",
+    start_date="2025-08-15",
+    end_date="2025-08-23",
     time_interval=5  # 5-minute intervals
 )
 
-# Save to CSV
-if df is not None and not df.empty:
-    df.to_csv("SPY_5m.csv", index=False)
+# Data is automatically saved to data/5m/SPY.csv
+```
+
+### Data Aggregation
+
+Convert minute data to higher timeframes:
+
+```python
+from market_data_aggregator import aggregate_market_data
+
+# Aggregate 1-minute data to 3-minute
+aggregate_market_data("1m", "3m", "SPY")
+
+# Aggregate 1-minute data to 15-minute
+aggregate_market_data("1m", "15m", "SPY")
+```
+
+### File Structure
+
+The client organizes data in a structured format:
+
+```
+data/
+├── 1m/
+│   ├── SPY.csv
+│   ├── QQQ.csv
+│   └── AAPL.csv
+├── 5m/
+│   ├── SPY.csv
+│   ├── QQQ.csv
+│   └── AAPL.csv
+└── 15m/
+    ├── SPY.csv
+    ├── QQQ.csv
+    └── AAPL.csv
 ```
 
 ### Advanced Usage
@@ -155,7 +226,6 @@ from schwab_market_data_client import (
 
 # Custom configuration
 api_config = APIConfig(
-    access_token="YOUR_TOKEN",
     timeout=60,
     rate_limit_delay=2.0
 )
@@ -169,27 +239,17 @@ market_config = MarketConfig(
 # Create client
 client = SchwabMarketDataClient(api_config, market_config)
 
-# Fetch data for multiple symbols
-symbols = ["SPY", "QQQ", "AAPL"]
-time_intervals = [1, 5, 15]  # 1min, 5min, 15min
+# Fetch data with validation
+df = client.get_price_history(
+    symbol="SPY",
+    start_date="2025-08-15",
+    end_date="2025-08-23",
+    time_interval=1
+)
 
-for symbol in symbols:
-    for interval in time_intervals:
-        df = client.get_price_history(
-            symbol=symbol,
-            start_date="2025-01-01",
-            end_date="2025-01-31",
-            time_interval=interval
-        )
-
-        if df is not None and not df.empty:
-            # Validate data quality
-            if DataQualityValidator.validate_dataframe(df):
-                filename = f"{symbol}_{interval}m.csv"
-                df.to_csv(filename, index=False)
-                print(f"✅ Saved {filename}")
-            else:
-                print(f"❌ Data quality issues for {symbol}_{interval}m")
+if df is not None and not df.empty:
+    # Data is automatically validated and saved
+    print(f"✅ Fetched {len(df)} records")
 ```
 
 ## 📊 Data Format
