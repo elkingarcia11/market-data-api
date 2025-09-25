@@ -1,26 +1,42 @@
-# Schwab Market Data API Client
+# Market Data API
 
-A robust Python client for fetching historical market data from the Schwab Market Data API with optimal period chunking and comprehensive data quality validation.
+A comprehensive Python system for fetching, processing, and managing historical market data from the Schwab Market Data API. Features intelligent data fetching, quality validation, cloud-based authentication, and data aggregation capabilities.
 
 ## 🚀 Features
+
+### Core Functionality
 
 - **Optimal Period Chunking**: Intelligently fetches data in decreasing chunks (10→5→4→3→2→1 days) to maximize API efficiency
 - **Comprehensive Data Validation**: Built-in quality checks for duplicates, null values, negative prices, and timestamp ordering
 - **Market Hours Filtering**: Automatically filters data to regular market hours (9:30 AM - 4:00 PM ET)
 - **Special Holiday Handling**: Supports early market closures (July 3rd, Black Friday, December 24th, etc.)
-- **Data Appending**: Smart append functionality that automatically combines new data with existing files
-- **GCS Authentication**: Integrated Google Cloud Storage authentication for Schwab refresh tokens
+- **Smart Data Appending**: Automatically combines new data with existing files without duplicates
+
+### Authentication & Security
+
+- **GCS Authentication**: Integrated Google Cloud Storage authentication for secure token management
+- **Automatic Token Refresh**: Handles token refresh and expiration automatically
+- **Schwab OAuth Integration**: Complete OAuth 2.0 flow implementation
+
+### Data Processing
+
 - **Multiple Timeframes**: Support for 1m, 5m, 10m, 15m, 30m intervals with configurable fetching
 - **Data Aggregation**: Built-in aggregation tools to convert minute data to higher timeframes
+- **Structured Storage**: Organized file structure with `data/{timeframe}m/{symbol}.csv` format
+
+### Development Features
+
 - **Professional Logging**: Structured logging with timestamps and log levels
 - **Type Safety**: Full type hints for better IDE support and code clarity
 - **Modular Architecture**: Clean, maintainable object-oriented design
 - **Rate Limiting**: Built-in rate limiting to respect API constraints
+- **Error Handling**: Comprehensive error handling for network, API, and data quality issues
 
 ## 📋 Requirements
 
 - Python 3.8+
-- Schwab API access token
+- Charles Schwab Developer Account
+- Google Cloud Storage Account (for secure token storage)
 - Internet connection
 
 ## 🛠️ Installation
@@ -29,7 +45,7 @@ A robust Python client for fetching historical market data from the Schwab Marke
 
    ```bash
    git clone <repository-url>
-   cd schwab-market-data-api
+   cd market-data-api
    ```
 
 2. **Create a virtual environment:**
@@ -47,26 +63,22 @@ A robust Python client for fetching historical market data from the Schwab Marke
 
 4. **Set up environment variables:**
    ```bash
-   # Create .env file
-   cp .env.example .env  # if .env.example exists
-   # OR create manually:
-   echo "SCHWAB_ACCESS_TOKEN=your_access_token_here" > .env
+   # Create .env file with your Schwab API credentials
+   cat > .env << EOF
+   SCHWAB_APP_KEY=your_schwab_app_key
+   SCHWAB_APP_SECRET=your_schwab_app_secret
+   GCS_BUCKET_NAME=your_gcs_bucket_name
+   GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/service-account-key.json
+   EOF
    ```
 
 ## 🔧 Configuration
 
 ### Configuration Files
 
-The client uses configuration files for flexible operation:
+The system uses configuration files for flexible operation:
 
-1. **`start_end_date.txt`**: Contains start and end dates (one per line)
-
-   ```
-   2025-08-15
-   2025-08-23
-   ```
-
-2. **`symbols.txt`**: Lists symbols to fetch (one per line)
+1. **`symbols.txt`**: Lists symbols to fetch (one per line)
 
    ```
    SPY
@@ -74,16 +86,25 @@ The client uses configuration files for flexible operation:
    AAPL
    ```
 
-3. **`timeframes.txt`**: Specifies time intervals (one per line)
+2. **`timeframes.txt`**: Specifies time intervals in minutes (one per line)
+
    ```
    1
    5
    15
    ```
 
+3. **`start_end_date.txt`**: Contains start and end dates (one per line)
+
+   ```
+   2025-08-23
+   ```
+
+   Note: If only one date is provided, it's used as the start date and the system fetches until today.
+
 ### Authentication Setup
 
-The client uses Google Cloud Storage (GCS) for secure authentication token management:
+The system uses Google Cloud Storage (GCS) for secure authentication token management:
 
 1. **Schwab Authentication Module**: Uses the integrated `charles-schwab-authentication-module`
 2. **GCS Integration**: Automatically retrieves refresh tokens from Google Cloud Storage
@@ -91,7 +112,7 @@ The client uses Google Cloud Storage (GCS) for secure authentication token manag
 
 ### Getting Your Schwab API Access
 
-To use this client, you'll need Schwab API access:
+To use this system, you'll need Schwab API access:
 
 1. **Register for Schwab Developer Account**: Visit the [Schwab Developer Portal](https://developer.schwab.com/)
 2. **Create an Application**: Set up a new application in your developer dashboard
@@ -102,22 +123,17 @@ To use this client, you'll need Schwab API access:
 
 ### API Configuration
 
-The client automatically reads the access token from the `.env` file. The `APIConfig` class in `schwab_market_data_client.py` is configured to use environment variables:
+The system automatically handles authentication through the integrated Schwab authentication module. The `APIConfig` class in `schwab_market_data_client.py` is configured for optimal API usage:
 
 ```python
 @dataclass
 class APIConfig:
     server: str = "https://api.schwabapi.com/marketdata/v1"
-    access_token: str = os.getenv("SCHWAB_ACCESS_TOKEN") or ""
     timeout: int = 30
     rate_limit_delay: float = 1.0
 ```
 
-**Note**: If you prefer to hardcode the token (not recommended for security), you can modify the `access_token` line to:
-
-```python
-access_token: str = "YOUR_ACCESS_TOKEN_HERE"  # Replace with your token
-```
+**Note**: Access tokens are automatically retrieved from GCS and refreshed as needed. No manual token management required.
 
 ### Market Configuration
 
@@ -144,18 +160,19 @@ class MarketConfig:
    echo -e "2025-08-15\n2025-08-23" > start_end_date.txt
    ```
 
-2. **Run the client**:
+2. **Run the system**:
    ```bash
    source venv/bin/activate
    python schwab_market_data_client.py
    ```
 
-The client will automatically:
+The system will automatically:
 
 - Fetch data for all symbols in `symbols.txt`
 - Use all timeframes in `timeframes.txt`
 - Save data to `data/{timeframe}m/{symbol}.csv`
 - Append new data to existing files (no duplicates)
+- Handle authentication and token refresh automatically
 
 ### Programmatic Usage
 
@@ -196,22 +213,29 @@ aggregate_market_data("1m", "15m", "SPY")
 
 ### File Structure
 
-The client organizes data in a structured format:
+The system organizes data in a structured format:
 
 ```
-data/
-├── 1m/
-│   ├── SPY.csv
-│   ├── QQQ.csv
-│   └── AAPL.csv
-├── 5m/
-│   ├── SPY.csv
-│   ├── QQQ.csv
-│   └── AAPL.csv
-└── 15m/
-    ├── SPY.csv
-    ├── QQQ.csv
-    └── AAPL.csv
+market-data-api/
+├── data/
+│   ├── 1m/
+│   │   └── SPY.csv
+│   ├── 3m/
+│   │   └── SPY.csv
+│   └── 5m/
+│       ├── SPY.csv
+│       └── SPY_indicators.csv
+├── charles-schwab-authentication-module/
+│   ├── schwab_auth.py
+│   ├── gcs-python-module/
+│   └── README.md
+├── schwab_market_data_client.py
+├── market_data_aggregator.py
+├── symbols.txt
+├── timeframes.txt
+├── start_end_date.txt
+├── requirements.txt
+└── README.md
 ```
 
 ### Advanced Usage
@@ -316,16 +340,28 @@ This ensures optimal API usage while maintaining complete data coverage.
 
 The project follows a modular, object-oriented design:
 
-- **`SchwabMarketDataClient`**: Main API client
-- **`DataQualityValidator`**: Data validation logic
-- **`MarketDataProcessor`**: Data processing and filtering
-- **`PeriodOptimizer`**: Optimal period calculation
+### Core Components
+
+- **`SchwabMarketDataClient`**: Main API client for data fetching
+- **`DataQualityValidator`**: Comprehensive data validation logic
+- **`MarketDataProcessor`**: Data processing and market hours filtering
+- **`PeriodOptimizer`**: Optimal period calculation for API efficiency
 - **`APIConfig`**: API configuration management
-- **`MarketConfig`**: Market-specific settings
+- **`MarketConfig`**: Market-specific settings and holiday handling
+
+### Authentication Module
+
+- **`SchwabAuth`**: OAuth 2.0 authentication with GCS integration
+- **`GCSClient`**: Google Cloud Storage operations for secure token management
+
+### Data Processing
+
+- **`market_data_aggregator.py`**: Converts minute data to higher timeframes
+- **Data Storage**: Structured CSV format with timestamp preservation
 
 ## 📝 Logging
 
-The client uses structured logging with different levels:
+The system uses structured logging with different levels:
 
 - **INFO**: General information and progress updates
 - **WARNING**: Non-critical issues (e.g., zero volume records)
@@ -341,16 +377,17 @@ Example log output:
 
 ## 🚨 Error Handling
 
-The client handles various error scenarios:
+The system handles various error scenarios:
 
 - **Network Errors**: Automatic retry and graceful degradation
 - **API Errors**: Detailed error messages with response codes
 - **Data Quality Issues**: Comprehensive validation with specific error reporting
 - **Rate Limiting**: Built-in delays to respect API constraints
+- **Authentication Errors**: Automatic token refresh and GCS fallback
 
 ## 📚 API Documentation
 
-For detailed API endpoint documentation, see [API_ENDPOINTS.md](API_ENDPOINTS.md).
+For detailed API endpoint documentation, see [API.md](API.md).
 
 ## 🤝 Contributing
 
@@ -374,20 +411,63 @@ If you encounter any issues:
 
 1. **Environment Setup Issues**:
 
-   - Ensure your `.env` file exists and contains `SCHWAB_ACCESS_TOKEN=your_token`
-   - Verify the token is not expired or invalid
-   - Check that python-dotenv is installed: `pip install python-dotenv`
+   - Ensure your `.env` file exists and contains all required Schwab API credentials
+   - Verify your Google Cloud Storage credentials are properly configured
+   - Check that all dependencies are installed: `pip install -r requirements.txt`
 
-2. **API Issues**:
+2. **Authentication Issues**:
 
-   - Check the [API_ENDPOINTS.md](API_ENDPOINTS.md) for endpoint details
+   - Check the [charles-schwab-authentication-module/README.md](charles-schwab-authentication-module/README.md) for detailed setup
+   - Verify your Schwab API credentials are valid
+   - Ensure your GCS bucket exists and is accessible
+   - Check that your service account has proper permissions
+
+3. **API Issues**:
+
+   - Check the [API.md](API.md) for endpoint details
    - Verify your access token is valid and has proper permissions
    - Ensure you have proper internet connectivity
    - Check the logs for detailed error messages
 
-3. **Common Error Messages**:
-   - `"No access token provided"`: Check your `.env` file and token value
+4. **Common Error Messages**:
+   - `"No valid refresh token available"`: Run authentication setup first
    - `"API request failed: 401"`: Token is invalid or expired
    - `"API request failed: 429"`: Rate limit exceeded, increase `rate_limit_delay`
 
 For additional support, please open an issue on the project repository.
+
+## 📊 Current Project Status
+
+### Data Collected
+
+The system has successfully collected market data for:
+
+- **Symbol**: SPY (SPDR S&P 500 ETF Trust)
+- **Timeframes**: 1m, 3m, 5m intervals
+- **Date Range**: January 2, 2025 onwards
+- **Data Quality**: All data validated and filtered for market hours
+
+### File Structure
+
+```
+data/
+├── 1m/SPY.csv          # 1-minute interval data
+├── 3m/SPY.csv          # 3-minute interval data (aggregated)
+└── 5m/
+    ├── SPY.csv         # 5-minute interval data
+    └── SPY_indicators.csv  # Additional indicators data
+```
+
+### Sample Data Format
+
+```csv
+timestamp,datetime,open,high,low,close,volume
+1735828200000,2025-01-02 09:30:00 EST,589.39,589.65,587.81,587.83,1596109
+1735828500000,2025-01-02 09:35:00 EST,587.8,587.91,586.23,586.26,762802
+```
+
+### Configuration
+
+- **Current Symbol**: SPY
+- **Current Timeframe**: 5 minutes
+- **Start Date**: 2025-08-23 (configurable via `start_end_date.txt`)
