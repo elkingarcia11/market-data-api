@@ -12,3 +12,4 @@ data/
 schwab_refresh_token.txt
 service-account-credentials.json
 .DS_Store
+__pycache__/

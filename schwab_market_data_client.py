@@ -447,7 +447,9 @@ def main():
     
     # Parameters - Fetch from Aug 16, 2025 until today
     symbols = open("symbols.txt").read().splitlines()
-    start_date, end_date = open("start_end_date.txt").read().splitlines()
+    date_lines = open("start_end_date.txt").read().splitlines()
+    start_date = date_lines[0] if date_lines else "2025-08-23"
+    end_date = date_lines[1] if len(date_lines) > 1 else None
     time_intervals = open("timeframes.txt").read().splitlines()
     # Use 1-minute intervals
     for time_interval in time_intervals:

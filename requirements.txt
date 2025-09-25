@@ -2,3 +2,12 @@ requests
 pandas
 pytz
 python-dotenv
+matplotlib 
+seaborn
+plotly
+numpy
+reportlab
+tqdm
+schedule
+joblib
+scikit-learn
